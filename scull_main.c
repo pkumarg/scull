@@ -6,24 +6,39 @@ MODULE_DESCRIPTION("LDD3 scull module");
 MODULE_LICENSE("GPL");
 
 const char *scull_name = "scull";
-const unsigned base_minor = 0;
-const unsigned count_minor  = 1;
+static const unsigned scull_minor = 0; // Scull minor range start
+static unsigned scull_major = 0;
+static const unsigned count_minor  = 1;
 
 dev_t scull_dev = 0;
 
 static int __init scull_init(void)
 {
 	int retVal = 0;
+
 	printk(KERN_INFO "Initializing scull...\n");
-	if(0 != (retVal = alloc_chrdev_region(&scull_dev, base_minor,
-					count_minor, scull_name)))
+
+	if(scull_major)
 	{
-		printk(KERN_ERR "alloc_chrdev_region() failed: %d\n", retVal);
+		scull_dev = MKDEV(scull_major, scull_minor);
+		retVal = register_chrdev_region(scull_dev, count_minor, scull_name);
+	}
+	else
+	{
+		retVal = alloc_chrdev_region(&scull_dev, scull_minor, count_minor,
+				scull_name);
 	}
 
-	printk(KERN_INFO "scull major=%u minor=%u\n", MAJOR(scull_dev), MINOR(scull_dev));
+	if(retVal < 0)
+	{
+		printk("char dev region alloc/reg failed major=%d retVal=%d",
+				scull_major, retVal);
+	}
 
-	return 0;
+	printk(KERN_INFO "scull major=%u minor=%u\n", MAJOR(scull_dev),
+			MINOR(scull_dev));
+
+	return retVal;
 }
 
 static void __exit scull_exit(void)
