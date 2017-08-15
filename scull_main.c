@@ -11,7 +11,6 @@ static unsigned scull_major = 0;
 static const unsigned count_minor  = 1;
 
 dev_t scull_dev_id = 0;
-struct cdev scull_cdev;
 
 
 /*<---			Function declarations			--->*/
@@ -36,7 +35,7 @@ struct file_operations scull_fops = {
 };
 
 // Scull device structure
-typedef struct scull_dev_t
+typedef struct scull_dev
 {
 	struct scull_qset *data; /* Pointer to first quantum set */
 	int quantum; /* the current quantum size */
@@ -47,42 +46,68 @@ typedef struct scull_dev_t
 	struct cdev cdev; /* Char device structure */
 } scull_dev;
 
+scull_dev *p_scull_dev = NULL;
+
 static int __init scull_init(void)
 {
-	int retVal = 0;
+	int ret_val = 0;
 
 	printk(KERN_INFO "Initializing scull...\n");
 
 	if(scull_major)
 	{
 		scull_dev_id = MKDEV(scull_major, scull_minor);
-		retVal = register_chrdev_region(scull_dev_id, count_minor, scull_name);
+		ret_val = register_chrdev_region(scull_dev_id, count_minor, scull_name);
 	}
 	else
 	{
-		retVal = alloc_chrdev_region(&scull_dev_id, scull_minor, count_minor,
+		ret_val = alloc_chrdev_region(&scull_dev_id, scull_minor, count_minor,
 				scull_name);
 	}
 
-	if(retVal < 0)
+	if(ret_val < 0)
 	{
-		printk("char dev region alloc/reg failed major=%d retVal=%d",
-				scull_major, retVal);
-		return retVal;
+		printk("char dev region alloc/reg failed major=%d ret_val=%d",
+				scull_major, ret_val);
+		return ret_val;
 	}
 
 	printk(KERN_INFO "scull major=%u minor=%u\n", MAJOR(scull_dev_id),
 			MINOR(scull_dev_id));
 
-	// Initialize the device structure
-	cdev_init(&scull_cdev, &scull_fops);
+	// Allocate scull_dev
+	p_scull_dev = (scull_dev *) kmalloc(sizeof(scull_dev), (GFP_KERNEL | __GFP_REPEAT));
 
-	return retVal;
+	if(!p_scull_dev)
+	{
+		printk("Failed to allocate scull_dev\n.");
+		return -ENOMEM;
+	}
+
+	// Initialize cdev struct
+	cdev_init(&p_scull_dev->cdev, &scull_fops);
+	p_scull_dev->cdev.owner = THIS_MODULE;
+	p_scull_dev->cdev.ops = &scull_fops;
+
+	// Lets add our device in Kernel subsystem to make it live
+	// They say about last argument is that it's 1 in almost all
+	// cases and my case not seems specific so taking as 1
+	ret_val = cdev_add(&p_scull_dev->cdev, scull_dev_id, 1);
+
+	if (ret_val < 0)
+		printk(KERN_ERR "cdev_add() failed %d", ret_val);
+	return ret_val;
 }
 
 static void __exit scull_exit(void)
 {
 	printk(KERN_INFO "Exiting scull...\n");
+
+	if(p_scull_dev)
+		cdev_del(&p_scull_dev->cdev);
+
+	kfree(p_scull_dev);
+
 	unregister_chrdev_region(scull_dev_id, count_minor);
 }
 
