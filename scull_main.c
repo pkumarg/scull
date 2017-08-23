@@ -42,15 +42,15 @@ struct file_operations scull_fops = {
 struct scull_qset;
 struct scull_qset
 {
-    void **data;
+    void **data; // pointer to array of quantums
     struct scull_qset *next;
 };
 
 struct scull_dev
 {
-	struct scull_qset *data; /* Pointer to first quantum set */
-	int quantum; /* the current quantum size */
-	int qset; /* the current array size */
+	struct scull_qset *qdata; /* Pointer to first quantum set */
+	int curr_quantums; /* the curr quantum size */
+	int curr_qsets; /* the curr array size */
 	unsigned long size; /* amount of data stored here */
 	unsigned int access_key; /* used by sculluid and scullpriv */
 	struct semaphore sem; /* mutual exclusion semaphore */
@@ -60,9 +60,10 @@ struct scull_dev
 struct scull_dev *p_scull_dev = NULL;
 
 // Scull private funcitons
-int scull_trim(struct scull_dev *dev);
-struct scull_qset* scull_follow(struct scull_dev *dev, int item);
+int scull_trim(struct scull_dev *p_dev);
+struct scull_qset* scull_follow(struct scull_dev *p_dev, int item);
 
+// Function definitions
 static int __init scull_init(void)
 {
 	int ret_val = 0;
@@ -134,36 +135,37 @@ loff_t scull_llseek(struct file *filp, loff_t offset, int pos)
 
 ssize_t scull_read(struct file *filp, char __user *read_buff, size_t size, loff_t *offset)
 {
-    struct scull_dev *dev = filp->private_data; 
-    struct scull_qset *dptr;    /* the first listitem */
-    int quantum = dev->quantum, qset = dev->qset;
-    int itemsize = quantum * qset; /* how many bytes in the listitem */
+    struct scull_dev *p_dev = filp->private_data; 
+    struct scull_qset *p_qset;    /* the first listitem */
+    int curr_quantums = p_dev->curr_quantums;
+    int curr_qsets = p_dev->curr_qsets;
+    int itemsize = curr_quantums * curr_qsets; /* how many bytes in the listitem */
     int item, s_pos, q_pos, rest;
     ssize_t retval = 0;
 
-    if (down_interruptible(&dev->sem))
+    if (down_interruptible(&p_dev->sem))
 	return -ERESTARTSYS;
-    if (*offset >= dev->size)
+    if (*offset >= p_dev->size)
 	goto out;
-    if (*offset + size > dev->size)
-	size = dev->size - *offset;
+    if (*offset + size > p_dev->size)
+	size = p_dev->size - *offset;
 
-    /* find listitem, qset index, and offset in the quantum */
+    /* find listitem, curr_qsets index, and offset in the curr_quantums */
     item = (long)*offset / itemsize;
     rest = (long)*offset % itemsize;
-    s_pos = rest / quantum; q_pos = rest % quantum;
+    s_pos = rest / curr_quantums; q_pos = rest % curr_quantums;
 
     /* follow the list up to the right position (defined elsewhere) */
-    dptr = scull_follow(dev, item);
+    p_qset = scull_follow(p_dev, item);
 
-    if (dptr == NULL || !dptr->data || ! dptr->data[s_pos])
+    if (p_qset == NULL || !p_qset->data || ! p_qset->data[s_pos])
 	goto out; /* don't fill holes */
 
-    /* read only up to the end of this quantum */
-    if (size > quantum - q_pos)
-	size = quantum - q_pos;
+    /* read only up to the end of this curr_quantums */
+    if (size > curr_quantums - q_pos)
+	size = curr_quantums - q_pos;
 
-    if (copy_to_user(read_buff, (dptr->data[s_pos] + q_pos), size))
+    if (copy_to_user(read_buff, (p_qset->data[s_pos] + q_pos), size))
     {
 	retval = -EFAULT;
 	goto out;
@@ -173,14 +175,60 @@ ssize_t scull_read(struct file *filp, char __user *read_buff, size_t size, loff_
     retval = size;
 
 out:
-    up(&dev->sem);
+    up(&p_dev->sem);
     return retval;
 }
 
 ssize_t scull_write(struct file *filp, const char __user *write_buff, size_t size, loff_t *offset)
 {
-	ssize_t write_bytes = 0;
-	return write_bytes;
+    struct scull_dev *p_dev = filp->private_data;
+    struct scull_qset *p_qset;
+    int curr_quantums = p_dev->curr_quantums, curr_qsets = p_dev->curr_qsets;
+    int itemsize = curr_quantums * curr_qsets;
+    int item, s_pos, q_pos, rest;
+    ssize_t retval = -ENOMEM; /* value used in "goto out" statements */
+
+    if (down_interruptible(&p_dev->sem))
+	return -ERESTARTSYS;
+
+    /* find listitem, curr_qsets index and offset in the curr_quantums */
+    item = (long)*offset / itemsize;
+    rest = (long)*offset % itemsize;
+    s_pos = rest / curr_quantums; q_pos = rest % curr_quantums;
+
+    /* follow the list up to the right position */
+    p_qset = scull_follow(p_dev, item);
+    if (p_qset == NULL)
+	goto out;
+    if (!p_qset->data) {
+	p_qset->data = kmalloc(curr_qsets * sizeof(char *), GFP_KERNEL);
+	if (!p_qset->data)
+	    goto out;
+	memset(p_qset->data, 0, curr_qsets * sizeof(char *));
+    }
+    if (!p_qset->data[s_pos]) {
+	p_qset->data[s_pos] = kmalloc(curr_quantums, GFP_KERNEL);
+	if (!p_qset->data[s_pos])
+	    goto out;
+    }
+    /* write only up to the end of this curr_quantums */
+    if (size > curr_quantums - q_pos)
+	size = curr_quantums - q_pos;
+
+    if (copy_from_user(p_qset->data[s_pos]+q_pos, write_buff, size)) {
+	retval = -EFAULT;
+	goto out;
+    }
+    *offset += size;
+    retval = size;
+
+    /* update the size */
+    if (p_dev->size < *offset)
+	p_dev->size = *offset;
+
+out:
+    up(&p_dev->sem);
+    return retval;
 }
 
 long scull_unlocked_ioctl(struct file *filp, unsigned int something, unsigned long sometihng1)
@@ -191,13 +239,13 @@ long scull_unlocked_ioctl(struct file *filp, unsigned int something, unsigned lo
 
 int scull_open(struct inode *f_inode, struct file *filp)
 {
-    struct scull_dev *dev;
-    dev = container_of(f_inode->i_cdev, struct scull_dev, cdev);
-    filp->private_data = dev; // For other methods use
+    struct scull_dev *p_dev;
+    p_dev = container_of(f_inode->i_cdev, struct scull_dev, cdev);
+    filp->private_data = p_dev; // For other methods use
 
     // Trimming to zero in case of write only operation
     if ( (filp->f_flags & O_ACCMODE) == O_WRONLY) {
-        scull_trim(dev); /* ignore errors */
+        scull_trim(p_dev); /* ignore errors */
     }
 
     return 0;
@@ -209,30 +257,40 @@ int scull_release(struct inode *f_inode, struct file *filp)
 	return result;
 }
 
-int scull_trim(struct scull_dev *dev)
+// Release all the data in scull
+int scull_trim(struct scull_dev *p_dev)
 {
-    struct scull_qset *next, *dptr;
-    int qset = dev->qset;
-    /* "dev" is not-null */
-    int i;
-    for (dptr = dev->data; dptr; dptr = next) { /* all the list items */
-        if (dptr->data) {
-            for (i = 0; i < qset; i++)
-                kfree(dptr->data[i]);
-            kfree(dptr->data);
-            dptr->data = NULL;
+    struct scull_qset *p_next_qset;
+    struct scull_qset *p_qset;
+    int curr_qsets = p_dev->curr_qsets;
+    int iter_qset;
+
+    p_next_qset = p_qset = p_dev->qdata;
+
+    while((p_qset = p_next_qset))
+    {
+        if(p_qset->data)
+        {
+            for (iter_qset = 0; iter_qset < curr_qsets; iter_qset++)
+            {
+                kfree(p_qset->data[iter_qset]);
+            }
+            kfree(p_qset->data);
+            p_qset->data = NULL;
         }
-        next = dptr->next;
-        kfree(dptr);
+
+        p_next_qset = p_qset->next;
+        kfree(p_qset);
     }
-    dev->size = 0;
-    dev->quantum = SCULL_QUANTUM_SIZE;
-    dev->qset = SCULL_QSET_SIZE;
-    dev->data = NULL;
+
+    p_dev->size = 0;
+    p_dev->curr_quantums = 0;
+    p_dev->curr_qsets = 0;
+    p_dev->qdata = NULL;
     return 0;
 }
 
-struct scull_qset* scull_follow(struct scull_dev *dev, int item)
+struct scull_qset* scull_follow(struct scull_dev *p_dev, int item)
 {
     struct scull_qset *qset = NULL;
     return qset;
