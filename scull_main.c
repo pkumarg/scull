@@ -5,6 +5,10 @@ MODULE_AUTHOR("Pushpendra Kumar");
 MODULE_DESCRIPTION("LDD3 scull module");
 MODULE_LICENSE("GPL");
 
+// Constants
+#define SCULL_QUANTUM_SIZE        1024
+#define SCULL_QSET_SIZE           1000
+
 const char *scull_name = "scull";
 static const unsigned scull_minor = 0; // Scull minor range start
 static unsigned scull_major = 0;
@@ -35,7 +39,14 @@ struct file_operations scull_fops = {
 };
 
 // Scull device structure
-typedef struct scull_dev
+struct scull_qset;
+struct scull_qset
+{
+    void **data;
+    struct scull_qset *next;
+};
+
+struct scull_dev
 {
 	struct scull_qset *data; /* Pointer to first quantum set */
 	int quantum; /* the current quantum size */
@@ -44,9 +55,13 @@ typedef struct scull_dev
 	unsigned int access_key; /* used by sculluid and scullpriv */
 	struct semaphore sem; /* mutual exclusion semaphore */
 	struct cdev cdev; /* Char device structure */
-} scull_dev;
+};
 
-scull_dev *p_scull_dev = NULL;
+struct scull_dev *p_scull_dev = NULL;
+
+// Scull private funcitons
+int scull_trim(struct scull_dev *dev);
+struct scull_qset* scull_follow(struct scull_dev *dev, int item);
 
 static int __init scull_init(void)
 {
@@ -76,7 +91,7 @@ static int __init scull_init(void)
 			MINOR(scull_dev_id));
 
 	// Allocate scull_dev
-	p_scull_dev = (scull_dev *) kmalloc(sizeof(scull_dev), (GFP_KERNEL | __GFP_REPEAT));
+	p_scull_dev = (struct scull_dev *) kmalloc(sizeof(struct scull_dev), (GFP_KERNEL | __GFP_REPEAT));
 
 	if(!p_scull_dev)
 	{
@@ -119,8 +134,47 @@ loff_t scull_llseek(struct file *filp, loff_t offset, int pos)
 
 ssize_t scull_read(struct file *filp, char __user *read_buff, size_t size, loff_t *offset)
 {
-	ssize_t read_bytes = 0;
-	return read_bytes;
+    struct scull_dev *dev = filp->private_data; 
+    struct scull_qset *dptr;    /* the first listitem */
+    int quantum = dev->quantum, qset = dev->qset;
+    int itemsize = quantum * qset; /* how many bytes in the listitem */
+    int item, s_pos, q_pos, rest;
+    ssize_t retval = 0;
+
+    if (down_interruptible(&dev->sem))
+	return -ERESTARTSYS;
+    if (*offset >= dev->size)
+	goto out;
+    if (*offset + size > dev->size)
+	size = dev->size - *offset;
+
+    /* find listitem, qset index, and offset in the quantum */
+    item = (long)*offset / itemsize;
+    rest = (long)*offset % itemsize;
+    s_pos = rest / quantum; q_pos = rest % quantum;
+
+    /* follow the list up to the right position (defined elsewhere) */
+    dptr = scull_follow(dev, item);
+
+    if (dptr == NULL || !dptr->data || ! dptr->data[s_pos])
+	goto out; /* don't fill holes */
+
+    /* read only up to the end of this quantum */
+    if (size > quantum - q_pos)
+	size = quantum - q_pos;
+
+    if (copy_to_user(read_buff, (dptr->data[s_pos] + q_pos), size))
+    {
+	retval = -EFAULT;
+	goto out;
+    }
+
+    *offset += size;
+    retval = size;
+
+out:
+    up(&dev->sem);
+    return retval;
 }
 
 ssize_t scull_write(struct file *filp, const char __user *write_buff, size_t size, loff_t *offset)
@@ -137,14 +191,51 @@ long scull_unlocked_ioctl(struct file *filp, unsigned int something, unsigned lo
 
 int scull_open(struct inode *f_inode, struct file *filp)
 {
-	int result = 0;
-	return result;
+    struct scull_dev *dev;
+    dev = container_of(f_inode->i_cdev, struct scull_dev, cdev);
+    filp->private_data = dev; // For other methods use
+
+    // Trimming to zero in case of write only operation
+    if ( (filp->f_flags & O_ACCMODE) == O_WRONLY) {
+        scull_trim(dev); /* ignore errors */
+    }
+
+    return 0;
 }
 
 int scull_release(struct inode *f_inode, struct file *filp)
 {
 	int result = 0;
 	return result;
+}
+
+int scull_trim(struct scull_dev *dev)
+{
+    struct scull_qset *next, *dptr;
+    int qset = dev->qset;
+    /* "dev" is not-null */
+    int i;
+    for (dptr = dev->data; dptr; dptr = next) { /* all the list items */
+        if (dptr->data) {
+            for (i = 0; i < qset; i++)
+                kfree(dptr->data[i]);
+            kfree(dptr->data);
+            dptr->data = NULL;
+        }
+        next = dptr->next;
+        kfree(dptr);
+    }
+    dev->size = 0;
+    dev->quantum = SCULL_QUANTUM_SIZE;
+    dev->qset = SCULL_QSET_SIZE;
+    dev->data = NULL;
+    return 0;
+}
+
+struct scull_qset* scull_follow(struct scull_dev *dev, int item)
+{
+    struct scull_qset *qset = NULL;
+    return qset;
 }
 
 module_init(scull_init);
