@@ -8,6 +8,8 @@
 #include <linux/fs.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 
 
 
