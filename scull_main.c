@@ -10,9 +10,11 @@ MODULE_LICENSE("GPL");
 #define SCULL_QSET_SIZE           1000
 
 const char *scull_name = "scull";
+const char *proc_file_name = "scullmem";
 static const unsigned scull_minor = 0; // Scull minor range start
 static unsigned scull_major = 0;
 static const unsigned count_minor  = 1;
+const int scull_nr_devs = 1; // Number of scull devices
 
 dev_t scull_dev_id = 0;
 
@@ -26,6 +28,12 @@ long scull_unlocked_ioctl(struct file *, unsigned int, unsigned long);
 int scull_open(struct inode *, struct file *);
 int scull_release(struct inode *, struct file *);
 
+// Scull sequence operations
+int scull_proc_open(struct inode *inode, struct file *file);
+void *scull_seq_start(struct seq_file *sfile, loff_t *pos);
+void *scull_seq_next(struct seq_file *sfile, void *v, loff_t *pos);
+void scull_seq_stop(struct seq_file *sfile, void *v);
+int scull_seq_show(struct seq_file *sfile, void *v);
 
 // Scull device operations structure
 struct file_operations scull_fops = {
@@ -56,6 +64,23 @@ struct scull_dev
     struct semaphore sem; /* mutual exclusion semaphore */
     struct cdev cdev; /* Char device structure */
 };
+
+// SCULL sequence operations
+static struct seq_operations scull_seq_ops = {
+    .start = scull_seq_start,
+    .next = scull_seq_next,
+    .stop = scull_seq_stop,
+    .show = scull_seq_show
+};
+
+static struct file_operations scull_proc_ops = {
+    .owner = THIS_MODULE,
+    .open = scull_proc_open,
+    .read = seq_read,
+    .llseek = seq_lseek,
+    .release = seq_release
+};
+
 
 struct scull_dev *p_scull_dev = NULL;
 
@@ -115,7 +140,14 @@ static int __init scull_init(void)
     ret_val = cdev_add(&p_scull_dev->cdev, scull_dev_id, 1);
 
     if (ret_val < 0)
+    {
         printk(KERN_ERR "cdev_add() failed %d", ret_val);
+        return ret_val;
+    }
+
+    // Creating /proc/scullmem for debugging
+    proc_create(proc_file_name, 0, NULL, &scull_proc_ops);
+
     DBG_FUNC_EXIT();
     return ret_val;
 }
@@ -123,6 +155,8 @@ static int __init scull_init(void)
 static void __exit scull_exit(void)
 {
     DBG_FUNC_ENTER();
+
+    printk(KERN_INFO "scull exiting...\n");
 
     if(p_scull_dev)
         cdev_del(&p_scull_dev->cdev);
@@ -331,6 +365,62 @@ struct scull_qset* scull_follow(struct scull_dev *p_dev, int item)
 {
     struct scull_qset *qset = NULL;
     return qset;
+}
+
+void *scull_seq_start(struct seq_file *s, loff_t *pos)
+{
+    if (*pos >= scull_nr_devs)
+        return NULL; /* No more to read */
+
+    return p_scull_dev + *pos;
+}
+
+void *scull_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+    (*pos)++;
+
+    if (*pos >= scull_nr_devs)
+        return NULL;
+
+    return p_scull_dev + *pos;
+}
+
+void scull_seq_stop(struct seq_file *sfile, void *v)
+{
+    // Nothing to do
+}
+
+int scull_seq_show(struct seq_file *s, void *v)
+
+{
+    struct scull_dev *dev = (struct scull_dev *) v;
+    struct scull_qset *d;
+    int i;
+
+    if (down_interruptible(&dev->sem))
+        return -ERESTARTSYS;
+    seq_printf(s, "\nDevice %i: qset %i, q %i, sz %li\n",
+            (int) (dev - p_scull_dev), dev->curr_qsets,
+            dev->curr_quantums, dev->size);
+
+    for (d = dev->qdata; d; d = d->next) { /* scan the list */
+        seq_printf(s, " item at %p, qset at %p\n", d, d->data);
+        if (d->data && !d->next) /* dump only the last item */
+            for (i = 0; i < dev->curr_qsets; i++) {
+                if (d->data[i])
+                    seq_printf(s, " % 4i: %8p\n",
+                            i, d->data[i]);
+            }
+    }
+
+    up(&dev->sem);
+
+    return 0;
+}
+
+int scull_proc_open(struct inode *inode, struct file *file)
+{
+     return seq_open(file, &scull_seq_ops);
 }
 
 module_init(scull_init);
