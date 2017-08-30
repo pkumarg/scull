@@ -61,7 +61,7 @@ struct scull_dev
     int curr_qsets; /* the curr array size */
     unsigned long size; /* amount of data stored here */
     unsigned int access_key; /* used by sculluid and scullpriv */
-    struct semaphore sem; /* mutual exclusion semaphore */
+    struct mutex lock; /* mutual exclusion mutex */
     struct cdev cdev; /* Char device structure */
 };
 
@@ -83,6 +83,7 @@ static struct file_operations scull_proc_ops = {
 
 
 struct scull_dev *p_scull_dev = NULL;
+struct proc_dir_entry *proc_dir_p = NULL;
 
 // Scull private funcitons
 int scull_trim(struct scull_dev *p_dev);
@@ -129,10 +130,15 @@ static int __init scull_init(void)
         return -ENOMEM;
     }
 
+    memset(p_scull_dev, 0, sizeof(struct scull_dev));
+
     // Initialize cdev struct
     cdev_init(&p_scull_dev->cdev, &scull_fops);
     p_scull_dev->cdev.owner = THIS_MODULE;
     p_scull_dev->cdev.ops = &scull_fops;
+
+    // Initilize the mutex
+    mutex_init(&p_scull_dev->lock);
 
     // Lets add our device in Kernel subsystem to make it live
     // They say about last argument is that it's 1 in almost all
@@ -146,7 +152,7 @@ static int __init scull_init(void)
     }
 
     // Creating /proc/scullmem for debugging
-    proc_create(proc_file_name, 0, NULL, &scull_proc_ops);
+    proc_dir_p = proc_create(proc_file_name, 0, NULL, &scull_proc_ops);
 
     DBG_FUNC_EXIT();
     return ret_val;
@@ -161,7 +167,11 @@ static void __exit scull_exit(void)
     if(p_scull_dev)
         cdev_del(&p_scull_dev->cdev);
 
+    mutex_destroy(&p_scull_dev->lock);
+
     kfree(p_scull_dev);
+
+    proc_remove(proc_dir_p);
 
     unregister_chrdev_region(scull_dev_id, count_minor);
 
@@ -193,8 +203,9 @@ ssize_t scull_read(struct file *filp, char __user *read_buff, size_t size, loff_
     itemsize = curr_quantums * curr_qsets; /* how many bytes in the listitem */
 
 
-    if (down_interruptible(&p_dev->sem))
+    if (mutex_lock_interruptible(&p_dev->lock))
         return -ERESTARTSYS;
+
     if (*offset >= p_dev->size)
         goto out;
     if (*offset + size > p_dev->size)
@@ -225,7 +236,7 @@ ssize_t scull_read(struct file *filp, char __user *read_buff, size_t size, loff_
     retval = size;
 
 out:
-    up(&p_dev->sem);
+    mutex_unlock(&p_dev->lock);
     return retval;
 }
 
@@ -237,7 +248,7 @@ ssize_t scull_write(struct file *filp, const char __user *write_buff, size_t siz
     int curr_qsets;
     int itemsize;
     int item, s_pos, q_pos, rest;
-    ssize_t retval = -ENOMEM; /* value used in "goto out" statements */
+    ssize_t retval = -ENOMEM;
 
     DBG_FUNC_ENTER();
 
@@ -247,7 +258,7 @@ ssize_t scull_write(struct file *filp, const char __user *write_buff, size_t siz
     curr_qsets = p_dev->curr_qsets;
     itemsize = curr_quantums * curr_qsets;
 
-    if (down_interruptible(&p_dev->sem))
+    if (mutex_lock_interruptible(&p_dev->lock))
         return -ERESTARTSYS;
 
     /* find listitem, curr_qsets index and offset in the curr_quantums */
@@ -286,7 +297,7 @@ ssize_t scull_write(struct file *filp, const char __user *write_buff, size_t siz
         p_dev->size = *offset;
 
 out:
-    up(&p_dev->sem);
+    mutex_unlock(&p_dev->lock);
 
     DBG_FUNC_EXIT();
     return retval;
@@ -333,6 +344,9 @@ int scull_trim(struct scull_dev *p_dev)
 
     DBG_FUNC_ENTER();
 
+    if (mutex_lock_interruptible(&p_dev->lock))
+        return -ERESTARTSYS;
+
     curr_qsets = p_dev->curr_qsets;
     p_next_qset = p_qset = p_dev->qdata;
 
@@ -356,6 +370,8 @@ int scull_trim(struct scull_dev *p_dev)
     p_dev->curr_quantums = 0;
     p_dev->curr_qsets = 0;
     p_dev->qdata = NULL;
+
+    mutex_unlock(&p_dev->lock);
 
     DBG_FUNC_EXIT();
     return 0;
@@ -390,37 +406,45 @@ void scull_seq_stop(struct seq_file *sfile, void *v)
     // Nothing to do
 }
 
-int scull_seq_show(struct seq_file *s, void *v)
+int scull_seq_show(struct seq_file *seq_fil_p, void *v)
 
 {
     struct scull_dev *dev = (struct scull_dev *) v;
-    struct scull_qset *d;
-    int i;
+    struct scull_qset *curr_qsets;
+    int iter_data;
 
-    if (down_interruptible(&dev->sem))
+    DBG_FUNC_ENTER();
+
+    if (mutex_lock_interruptible(&dev->lock))
         return -ERESTARTSYS;
-    seq_printf(s, "\nDevice %i: qset %i, q %i, sz %li\n",
+
+    seq_printf(seq_fil_p, "Device %i: qset %i, q %i, sz %li\n",
             (int) (dev - p_scull_dev), dev->curr_qsets,
             dev->curr_quantums, dev->size);
 
-    for (d = dev->qdata; d; d = d->next) { /* scan the list */
-        seq_printf(s, " item at %p, qset at %p\n", d, d->data);
-        if (d->data && !d->next) /* dump only the last item */
-            for (i = 0; i < dev->curr_qsets; i++) {
-                if (d->data[i])
-                    seq_printf(s, " % 4i: %8p\n",
-                            i, d->data[i]);
+    for (curr_qsets = dev->qdata; curr_qsets; curr_qsets = curr_qsets->next)
+    {
+        seq_printf(seq_fil_p, " item at %p, qset at %p\n", curr_qsets, curr_qsets->data);
+        if (curr_qsets->data && !curr_qsets->next)
+        {
+            for (iter_data = 0; iter_data < dev->curr_qsets; iter_data++)
+            {
+                if (curr_qsets->data[iter_data])
+                    seq_printf(seq_fil_p, " % 4i: %8p\n",
+                            iter_data, curr_qsets->data[iter_data]);
             }
+        }
     }
 
-    up(&dev->sem);
+    mutex_unlock(&dev->lock);
 
+    DBG_FUNC_EXIT();
     return 0;
 }
 
 int scull_proc_open(struct inode *inode, struct file *file)
 {
-     return seq_open(file, &scull_seq_ops);
+    return seq_open(file, &scull_seq_ops);
 }
 
 module_init(scull_init);

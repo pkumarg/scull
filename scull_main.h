@@ -10,6 +10,7 @@
 #include <linux/uaccess.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/mutex.h>
 
 
 
@@ -33,9 +34,9 @@
 /* Debug macros*/
 #ifdef SCULL_DEBUG_TRACE
 #define SCULL_DEBUG_LEVEL KERN_INFO
-#define DBG_INFO(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[INFO]: "formate, __VA_ARGS__))
-#define DBG_MED(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[MED]: "formate, __VA_ARGS__))
-#define DBG_HIGH(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[HIGH]: "formate, __VA_ARGS__))
+#define DBG_INFO(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[INFO]: "formate, ##__VA_ARGS__))
+#define DBG_MED(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[MED]: "formate, ##__VA_ARGS__))
+#define DBG_HIGH(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[HIGH]: "formate, ##__VA_ARGS__))
 #else
 #define DBG_INFO(formate, ...)
 #define DBG_MED(formate, ...)
