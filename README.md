@@ -1,5 +1,5 @@
 # scull
-LDD3 scull device source code as per book examples
+LDD3 scull device source code as per book examples. You can refer this code for the understanding of scull as per latest kernel.
 
 Installation:
 
