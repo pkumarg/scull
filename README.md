@@ -10,4 +10,9 @@ After successful load it will create below files in filesystem:
 1) Char device file: /dev/scull0
 2) Scull debugging file: /proc/scullmem
 
-Use it on your own risk. In case of any issue please feel free to raise issue.
+To remove scull when you are done playing:
+1) sudo ./scull_unload.sh
+
+Note: Use it on your own risk. In case of any issue please feel free to raise issue.
+
+All license are as per original scull license and GPLv3
