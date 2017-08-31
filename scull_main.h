@@ -21,6 +21,8 @@
 
 
 /* Defines */
+#define SCULL_QUANTUM_SIZE        4000
+#define SCULL_QSET_SIZE           1000
 
 
 

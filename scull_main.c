@@ -5,10 +5,15 @@ MODULE_AUTHOR("Pushpendra Kumar");
 MODULE_DESCRIPTION("LDD3 scull module");
 MODULE_LICENSE("GPL");
 
-// Constants
-#define SCULL_QUANTUM_SIZE        1024
-#define SCULL_QSET_SIZE           1000
+// Module params definitions
+static int curr_quantums   = SCULL_QUANTUM_SIZE;
+static int curr_qsets      = SCULL_QSET_SIZE;
 
+// Module parameters
+module_param(curr_quantums, int, S_IRUGO);
+module_param(curr_qsets, int, S_IRUGO);
+
+// Constants
 const char *scull_name = "scull";
 const char *proc_file_name = "scullmem";
 static const unsigned scull_minor = 0; // Scull minor range start
@@ -57,8 +62,8 @@ struct scull_qset
 struct scull_dev
 {
     struct scull_qset *qdata; /* Pointer to first quantum set */
-    int curr_quantums; /* the curr quantum size */
-    int curr_qsets; /* the curr array size */
+    int curr_quantums; /* the curr min allocatable quantum */
+    int curr_qsets; /* the curr min allocatable qset size */
     unsigned long size; /* amount of data stored here */
     unsigned int access_key; /* used by sculluid and scullpriv */
     struct mutex lock; /* mutual exclusion mutex */
@@ -208,6 +213,7 @@ ssize_t scull_read(struct file *filp, char __user *read_buff, size_t size, loff_
 
     if (*offset >= p_dev->size)
         goto out;
+
     if (*offset + size > p_dev->size)
         size = p_dev->size - *offset;
 
@@ -367,8 +373,8 @@ int scull_trim(struct scull_dev *p_dev)
     }
 
     p_dev->size = 0;
-    p_dev->curr_quantums = 0;
-    p_dev->curr_qsets = 0;
+    p_dev->curr_quantums = SCULL_QUANTUM_SIZE;
+    p_dev->curr_qsets = SCULL_QSET_SIZE;
     p_dev->qdata = NULL;
 
     mutex_unlock(&p_dev->lock);
@@ -379,7 +385,46 @@ int scull_trim(struct scull_dev *p_dev)
 
 struct scull_qset* scull_follow(struct scull_dev *p_dev, int item)
 {
-    struct scull_qset *qset = NULL;
+    struct scull_qset *qset;
+    DBG_FUNC_ENTER();
+
+    qset = p_dev->qdata;
+
+    // In case if there is nothing allocate first one
+    if (!qset)
+    {
+        qset = kmalloc(sizeof(struct scull_qset), GFP_KERNEL);
+        p_dev->qdata = qset;
+
+        if (qset == NULL)
+        {
+            DBG_FUNC_EXIT();
+            return NULL;
+        }
+
+        memset(qset, 0, sizeof(struct scull_qset));
+    }
+
+    // Follow untill we reach end of the list
+    while(item)
+    {
+        if (!qset->next)
+        {
+            // Ok we got the end lets allocate a new one
+            qset->next = kmalloc(sizeof(struct scull_qset), GFP_KERNEL);
+            if (qset->next == NULL)
+            {
+                DBG_FUNC_EXIT();
+                return NULL;
+            }
+            memset(qset->next, 0, sizeof(struct scull_qset));
+        }
+
+        qset = qset->next;
+        item--;
+    }
+
+    DBG_FUNC_EXIT();
     return qset;
 }
 
@@ -410,7 +455,7 @@ int scull_seq_show(struct seq_file *seq_fil_p, void *v)
 
 {
     struct scull_dev *dev = (struct scull_dev *) v;
-    struct scull_qset *curr_qsets;
+    struct scull_qset *curr_qset_p;
     int iter_data;
 
     DBG_FUNC_ENTER();
@@ -418,20 +463,20 @@ int scull_seq_show(struct seq_file *seq_fil_p, void *v)
     if (mutex_lock_interruptible(&dev->lock))
         return -ERESTARTSYS;
 
-    seq_printf(seq_fil_p, "Device %i: qset %i, q %i, sz %li\n",
+    seq_printf(seq_fil_p, "Device %i: curr_qsets=%i curr_quantums=%i total_size=%li\n",
             (int) (dev - p_scull_dev), dev->curr_qsets,
             dev->curr_quantums, dev->size);
 
-    for (curr_qsets = dev->qdata; curr_qsets; curr_qsets = curr_qsets->next)
+    for (curr_qset_p = dev->qdata; curr_qset_p; curr_qset_p = curr_qset_p->next)
     {
-        seq_printf(seq_fil_p, " item at %p, qset at %p\n", curr_qsets, curr_qsets->data);
-        if (curr_qsets->data && !curr_qsets->next)
+        seq_printf(seq_fil_p, " item at %p, qset at %p\n", curr_qset_p, curr_qset_p->data);
+        if (curr_qset_p->data && !curr_qset_p->next)
         {
             for (iter_data = 0; iter_data < dev->curr_qsets; iter_data++)
             {
-                if (curr_qsets->data[iter_data])
+                if (curr_qset_p->data[iter_data])
                     seq_printf(seq_fil_p, " % 4i: %8p\n",
-                            iter_data, curr_qsets->data[iter_data]);
+                            iter_data, curr_qset_p->data[iter_data]);
             }
         }
     }
