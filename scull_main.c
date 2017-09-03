@@ -309,10 +309,65 @@ out:
     return retval;
 }
 
-long scull_unlocked_ioctl(struct file *filp, unsigned int something, unsigned long sometihng1)
+long scull_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-    long no_idea = 0;
-    return no_idea;
+	int err = 0, tmp;
+	int retval = 0;
+	/*
+	 * extract the type and number bitfields, and don't decode
+	 * wrong cmds: return ENOTTY (inappropriate ioctl) before access_ok( )
+	 */
+	if (_IOC_TYPE(cmd) != SCULL_IOC_MAGIC) return -ENOTTY;
+	if (_IOC_NR(cmd) > SCULL_IOC_MAXNR) return -ENOTTY;
+	/*
+	 * the direction is a bitmask, and VERIFY_WRITE catches R/W
+	 * transfers. `Type' is user-oriented, while
+	 * access_ok is kernel-oriented, so the concept of "read" and
+	 * "write" is reversed
+	 */
+	if (_IOC_DIR(cmd) & _IOC_READ)
+		err = !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd));
+	else if (_IOC_DIR(cmd) & _IOC_WRITE)
+		err = !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd));
+	if (err) return -EFAULT;
+	switch(cmd) {
+		case SCULL_IOCRESET:
+			curr_quantums = SCULL_QUANTUM_SIZE;
+			curr_qsets = SCULL_QSET_SIZE;
+			break;
+		case SCULL_IOCSQUANTUM: /* Set: arg points to the value */
+			if (! capable (CAP_SYS_ADMIN))
+				return -EPERM;
+			retval = __get_user(curr_quantums, (int __user *)arg);
+			break;
+		case SCULL_IOCTQUANTUM: /* Tell: arg is the value */
+			if (! capable (CAP_SYS_ADMIN))
+				return -EPERM;
+			curr_quantums = arg;
+			break;
+		case SCULL_IOCGQUANTUM: /* Get: arg is pointer to result */
+			retval = __put_user(curr_quantums, (int __user *)arg);
+			break;
+		case SCULL_IOCQQUANTUM: /* Query: return it (it's positive) */
+			return curr_quantums;
+		case SCULL_IOCXQUANTUM: /* eXchange: use arg as pointer */
+			if (! capable (CAP_SYS_ADMIN))
+				return -EPERM;
+			tmp = curr_quantums;
+			retval = __get_user(curr_quantums, (int __user *)arg);
+			if (retval == 0)
+				retval = __put_user(tmp, (int __user *)arg);
+			break;
+		case SCULL_IOCHQUANTUM: /* sHift: like Tell + Query */
+			if (! capable (CAP_SYS_ADMIN))
+				return -EPERM;
+			tmp = curr_quantums;
+			curr_quantums = arg;
+			return tmp;
+		default: /* redundant, as cmd was checked against MAXNR */
+			return -ENOTTY;
+	}
+	return retval;
 }
 
 int scull_open(struct inode *f_inode, struct file *filp)
@@ -330,7 +385,7 @@ int scull_open(struct inode *f_inode, struct file *filp)
         scull_trim(p_dev); /* ignore errors */
     }
 
-    //DBG_FUNC_EXIT();
+    DBG_FUNC_EXIT();
     return 0;
 }
 
