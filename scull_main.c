@@ -184,9 +184,30 @@ static void __exit scull_exit(void)
 }
 
 
-loff_t scull_llseek(struct file *filp, loff_t offset, int pos)
+loff_t scull_llseek(struct file *filp, loff_t off, int whence)
 {
-    return offset;
+    struct scull_dev *dev = filp->private_data;
+    loff_t newpos;
+    switch(whence) {
+        case 0: /* SEEK_SET */
+            newpos = off;
+            break;
+        case 1: /* SEEK_CUR */
+            newpos = filp->f_pos + off;
+            break;
+        case 2: /* SEEK_END */
+            newpos = dev->size + off;
+            break;
+        default: /* can't happen */
+            return -EINVAL;
+    }
+
+    if (newpos < 0)
+        return -EINVAL;
+
+    filp->f_pos = newpos;
+
+    return newpos;
 }
 
 ssize_t scull_read(struct file *filp, char __user *read_buff, size_t size, loff_t *offset)
