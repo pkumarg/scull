@@ -126,7 +126,11 @@ static int __init scull_init(void)
             MINOR(scull_dev_id));
 
     // Allocate scull_dev
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,13,0)
+    p_scull_dev = (struct scull_dev *) kmalloc(sizeof(struct scull_dev), (GFP_KERNEL | __GFP_RETRY_MAYFAIL));
+#else
     p_scull_dev = (struct scull_dev *) kmalloc(sizeof(struct scull_dev), (GFP_KERNEL | __GFP_REPEAT));
+#endif
 
     if(!p_scull_dev)
     {
