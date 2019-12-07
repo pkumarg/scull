@@ -350,10 +350,15 @@ long scull_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg
 	 * access_ok is kernel-oriented, so the concept of "read" and
 	 * "write" is reversed
 	 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
 	if (_IOC_DIR(cmd) & _IOC_READ)
 		err = !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd));
 	else if (_IOC_DIR(cmd) & _IOC_WRITE)
 		err = !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd));
+#else
+	//https://lkml.org/lkml/2019/1/4/418
+	err = !access_ok((void __user *)arg, _IOC_SIZE(cmd));
+#endif
 	if (err) return -EFAULT;
 	switch(cmd) {
 		case SCULL_IOCRESET:
