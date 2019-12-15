@@ -99,9 +99,7 @@ static int __init scull_init(void)
 {
     int ret_val = 0;
 
-    DBG_FUNC_ENTER();
-
-    printk(KERN_INFO "Initializing scull...\n");
+    SCULL_FUNC_ENTER();
 
     if(scull_major)
     {
@@ -116,13 +114,13 @@ static int __init scull_init(void)
 
     if(ret_val < 0)
     {
-        printk("char dev region alloc/reg failed major=%d ret_val=%d",
+        SCULL_INFO("char dev region alloc/reg failed major=%d ret_val=%d",
                 scull_major, ret_val);
-        DBG_FUNC_EXIT();
+        SCULL_FUNC_EXIT();
         return ret_val;
     }
 
-    printk(KERN_INFO "scull major=%u minor=%u\n", MAJOR(scull_dev_id),
+    SCULL_INFO("scull major=%u minor=%u", MAJOR(scull_dev_id),
             MINOR(scull_dev_id));
 
     // Allocate scull_dev
@@ -134,8 +132,8 @@ static int __init scull_init(void)
 
     if(!p_scull_dev)
     {
-        printk("Failed to allocate scull_dev\n.");
-        DBG_FUNC_EXIT();
+        SCULL_INFO("Failed to allocate scull_dev");
+        SCULL_FUNC_EXIT();
         return -ENOMEM;
     }
 
@@ -156,22 +154,22 @@ static int __init scull_init(void)
 
     if (ret_val < 0)
     {
-        printk(KERN_ERR "cdev_add() failed %d", ret_val);
+        SCULL_ERR("cdev_add() failed %d", ret_val);
         return ret_val;
     }
 
     // Creating /proc/scullmem for debugging
     proc_dir_p = proc_create(proc_file_name, 0, NULL, &scull_proc_ops);
 
-    DBG_FUNC_EXIT();
+    SCULL_INFO("scull initialized");
+
+    SCULL_FUNC_EXIT();
     return ret_val;
 }
 
 static void __exit scull_exit(void)
 {
-    DBG_FUNC_ENTER();
-
-    printk(KERN_INFO "scull exiting...\n");
+    SCULL_FUNC_ENTER();
 
     if(p_scull_dev)
         cdev_del(&p_scull_dev->cdev);
@@ -184,7 +182,9 @@ static void __exit scull_exit(void)
 
     unregister_chrdev_region(scull_dev_id, count_minor);
 
-    DBG_FUNC_EXIT();
+    SCULL_INFO("scull exited");
+
+    SCULL_FUNC_EXIT();
 }
 
 
@@ -224,7 +224,7 @@ ssize_t scull_read(struct file *filp, char __user *read_buff, size_t size, loff_
     int item, s_pos, q_pos, rest;
     ssize_t retval = 0;
 
-    DBG_FUNC_ENTER();
+    SCULL_FUNC_ENTER();
 
     p_dev = filp->private_data; 
 
@@ -281,7 +281,7 @@ ssize_t scull_write(struct file *filp, const char __user *write_buff, size_t siz
     int item, s_pos, q_pos, rest;
     ssize_t retval = -ENOMEM;
 
-    DBG_FUNC_ENTER();
+    SCULL_FUNC_ENTER();
 
     p_dev = filp->private_data;
 
@@ -322,6 +322,7 @@ ssize_t scull_write(struct file *filp, const char __user *write_buff, size_t siz
     }
     *offset += size;
     retval = size;
+    SCULL_INFO("written size=%zu", size);
 
     /* update the size */
     if (p_dev->size < *offset)
@@ -330,7 +331,7 @@ ssize_t scull_write(struct file *filp, const char __user *write_buff, size_t siz
 out:
     mutex_unlock(&p_dev->lock);
 
-    DBG_FUNC_EXIT();
+    SCULL_FUNC_EXIT();
     return retval;
 }
 
@@ -404,18 +405,19 @@ int scull_open(struct inode *f_inode, struct file *filp)
 {
     struct scull_dev *p_dev;
 
-    DBG_FUNC_ENTER();
+    SCULL_FUNC_ENTER();
 
     p_dev = container_of(f_inode->i_cdev, struct scull_dev, cdev);
     filp->private_data = p_dev; // For other methods use
 
-    DBG_INFO("%s(): %p\n", __func__, p_dev);
+    SCULL_INFO("%s(): %p", __func__, p_dev);
     // Trimming to zero in case of write only operation
-    if ( (filp->f_flags & O_ACCMODE) == O_WRONLY) {
+    if ( (filp->f_flags & O_ACCMODE) == O_WRONLY)
+    {
         scull_trim(p_dev); /* ignore errors */
     }
 
-    DBG_FUNC_EXIT();
+    SCULL_FUNC_EXIT();
     return 0;
 }
 
@@ -433,7 +435,7 @@ int scull_trim(struct scull_dev *p_dev)
     int curr_qsets;
     int iter_qset;
 
-    DBG_FUNC_ENTER();
+    SCULL_FUNC_ENTER();
 
     if (mutex_lock_interruptible(&p_dev->lock))
         return -ERESTARTSYS;
@@ -464,14 +466,14 @@ int scull_trim(struct scull_dev *p_dev)
 
     mutex_unlock(&p_dev->lock);
 
-    DBG_FUNC_EXIT();
+    SCULL_FUNC_EXIT();
     return 0;
 }
 
 struct scull_qset* scull_follow(struct scull_dev *p_dev, int item)
 {
     struct scull_qset *qset;
-    DBG_FUNC_ENTER();
+    SCULL_FUNC_ENTER();
 
     qset = p_dev->qdata;
 
@@ -483,7 +485,7 @@ struct scull_qset* scull_follow(struct scull_dev *p_dev, int item)
 
         if (qset == NULL)
         {
-            DBG_FUNC_EXIT();
+            SCULL_FUNC_EXIT();
             return NULL;
         }
 
@@ -499,7 +501,7 @@ struct scull_qset* scull_follow(struct scull_dev *p_dev, int item)
             qset->next = kmalloc(sizeof(struct scull_qset), GFP_KERNEL);
             if (qset->next == NULL)
             {
-                DBG_FUNC_EXIT();
+                SCULL_FUNC_EXIT();
                 return NULL;
             }
             memset(qset->next, 0, sizeof(struct scull_qset));
@@ -509,7 +511,7 @@ struct scull_qset* scull_follow(struct scull_dev *p_dev, int item)
         item--;
     }
 
-    DBG_FUNC_EXIT();
+    SCULL_FUNC_EXIT();
     return qset;
 }
 
@@ -543,7 +545,7 @@ int scull_seq_show(struct seq_file *seq_fil_p, void *v)
     struct scull_qset *curr_qset_p;
     int iter_data;
 
-    DBG_FUNC_ENTER();
+    SCULL_FUNC_ENTER();
 
     if (mutex_lock_interruptible(&dev->lock))
         return -ERESTARTSYS;
@@ -568,7 +570,7 @@ int scull_seq_show(struct seq_file *seq_fil_p, void *v)
 
     mutex_unlock(&dev->lock);
 
-    DBG_FUNC_EXIT();
+    SCULL_FUNC_EXIT();
     return 0;
 }
 

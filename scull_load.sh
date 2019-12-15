@@ -17,8 +17,8 @@ mknod /dev/${device}0 c $major 0
 
 # give appropriate group/permissions, and change the group.
 # Not all distributions have staff, some have "wheel" instead.
-group="pushpi"
-grep -q '^pushpi:' /etc/group || echo "Group pushpi doesn't exists"
+group="pkumar"
+grep -q '^pkumar:' /etc/group || echo "Group pkumar doesn't exists"
 
 chgrp $group /dev/${device}0
 chmod $mode /dev/${device}0

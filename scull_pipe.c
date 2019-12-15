@@ -24,7 +24,7 @@ static ssize_t scull_p_read (struct file *filp, char __user *buf, size_t count,
         if (filp->f_flags & O_NONBLOCK)
             return -EAGAIN;
 
-        DBG_HIGH("\"%s\" reading: going to sleep\n", current->comm);
+        SCULL_HIGH("\"%s\" reading: going to sleep\n", current->comm);
         if (wait_event_interruptible(dev->inq, (dev->rp != dev->wp)))
             return -ERESTARTSYS; /* signal: tell the fs layer to handle it */
 
@@ -53,7 +53,7 @@ static ssize_t scull_p_read (struct file *filp, char __user *buf, size_t count,
     /* finally, awake any writers and return */
     wake_up_interruptible(&dev->outq);
 
-    DBG_INFO("\"%s\" did read %li bytes\n", current->comm, (long)count);
+    SCULL_INFO("\"%s\" did read %li bytes\n", current->comm, (long)count);
 
     return count;
 }
