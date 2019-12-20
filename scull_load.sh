@@ -15,7 +15,7 @@ echo "Major is $major"
 
 mknod /dev/${device}0 c $major 0
 
-grep -q "^${USER}:" /etc/group || echo "Group ${USER} doesn't exists"
+grep -q "^${SUDO_USER}:" /etc/group || echo "Group ${SUDO_USER} doesn't exists"
 
-chgrp $USER /dev/${device}0
-chmod $MODE /dev/${device}0
+chgrp ${SUDO_USER} /dev/${device}0
+chmod ${MODE} /dev/${device}0
