@@ -61,12 +61,12 @@
 
 
 /* Debug macros*/
-#define SCULL_ERR(formate, ...) (printk(KERN_ERR "SCULL[ERROR]: "formate, ##__VA_ARGS__))
+#define SCULL_ERR(formate, ...) (printk(KERN_ERR "SCULL[ERROR]: "formate"\n", ##__VA_ARGS__))
 #ifdef SCULL_DEBUG_TRACE
 #define SCULL_DEBUG_LEVEL KERN_INFO
-#define SCULL_INFO(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[INFO]: "formate, ##__VA_ARGS__))
-#define SCULL_MED(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[MED]: "formate, ##__VA_ARGS__))
-#define SCULL_HIGH(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[HIGH]: "formate, ##__VA_ARGS__))
+#define SCULL_INFO(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[INFO]: "formate"\n", ##__VA_ARGS__))
+#define SCULL_MED(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[MED]: "formate"\n", ##__VA_ARGS__))
+#define SCULL_HIGH(formate, ...) (printk(SCULL_DEBUG_LEVEL "SCULL[HIGH]: "formate"\n", ##__VA_ARGS__))
 #else
 #define SCULL_INFO(formate, ...)
 #define SCULL_MED(formate, ...)
