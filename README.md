@@ -16,3 +16,5 @@ To remove scull when you are done playing:
 Note: Use it on your own risk. In case of any issue please feel free to raise issue.
 
 All license are as per original scull license and GPLv3
+
+Verififed on Ubuntu. Try installing build-essential before make.
