@@ -78,6 +78,7 @@ static struct seq_operations scull_seq_ops = {
     .show = scull_seq_show
 };
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,6,0)
 static struct file_operations scull_proc_ops = {
     .owner = THIS_MODULE,
     .open = scull_proc_open,
@@ -85,6 +86,14 @@ static struct file_operations scull_proc_ops = {
     .llseek = seq_lseek,
     .release = seq_release
 };
+#else
+static struct proc_ops scull_proc_ops = {
+  .proc_open = scull_proc_open,
+  .proc_read = seq_read,
+  .proc_lseek = seq_lseek,
+  .proc_release = seq_release
+};
+#endif
 
 
 struct scull_dev *p_scull_dev = NULL;
